@@ -20,9 +20,6 @@ static char *argv0;
 #include "st.h"
 #include "win.h"
 
-#if THEMED_CURSOR_PATCH
-#include <X11/Xcursor/Xcursor.h>
-#endif // THEMED_CURSOR_PATCH
 
 /* types used in config.h */
 typedef struct {
@@ -88,20 +85,10 @@ typedef XftGlyphFontSpec GlyphFontSpec;
 typedef struct {
 	int tw, th; /* tty width and height */
 	int w, h; /* window width and height */
-	#if ANYSIZE_PATCH
-	int hborderpx, vborderpx;
-	#endif // ANYSIZE_PATCH
 	int ch; /* char height */
 	int cw; /* char width  */
-	#if VERTCENTER_PATCH
-	int cyo; /* char y offset */
-	#endif // VERTCENTER_PATCH
 	int mode; /* window state/mode flags */
 	int cursor; /* cursor style */
-	#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-	int vbellset; /* 1 during visual bell, 0 otherwise */
-	struct timespec lastvbell;
-	#endif // VISUALBELL_2_PATCH
 } TermWindow;
 
 typedef struct {
@@ -120,18 +107,9 @@ typedef struct {
 	Draw draw;
 	Visual *vis;
 	XSetWindowAttributes attrs;
-	#if HIDECURSOR_PATCH
-	/* Here, we use the term *pointer* to differentiate the cursor
-	 * one sees when hovering the mouse over the terminal from, e.g.,
-	 * a green rectangle where text would be entered. */
-	Cursor vpointer, bpointer; /* visible and hidden pointers */
-	int pointerisvisible;
-	#endif // HIDECURSOR_PATCH
 	int scr;
 	int isfixed; /* is fixed geometry? */
-	#if ALPHA_PATCH
 	int depth; /* bit depth */
-	#endif // ALPHA_PATCH
 	int l, t; /* left and top offset */
 	int gm; /* geometry mask */
 } XWindow;
@@ -240,10 +218,6 @@ static void (*handler[LASTEvent])(XEvent *) = {
  */
 	[PropertyNotify] = propnotify,
 	[SelectionRequest] = selrequest,
-	#if ST_EMBEDDER_PATCH
-	[CreateNotify] = createnotify,
-	[DestroyNotify] = destroynotify,
-	#endif // ST_EMBEDDER_PATCH
 };
 
 /* Globals */
@@ -274,9 +248,7 @@ static char *usedfont = NULL;
 static double usedfontsize = 0;
 static double defaultfontsize = 0;
 
-#if ALPHA_PATCH
 static char *opt_alpha = NULL;
-#endif // ALPHA_PATCH
 static char *opt_class = NULL;
 static char **opt_cmd  = NULL;
 static char *opt_embed = NULL;
@@ -285,14 +257,8 @@ static char *opt_io    = NULL;
 static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
-#if WORKINGDIR_PATCH
-static char *opt_dir   = NULL;
-#endif // WORKINGDIR_PATCH
 
 static int oldbutton = 3; /* button event on startup: 3 = release */
-#if VISUALBELL_1_PATCH && !VISUALBELL_2_PATCH && !VISUALBELL_3_PATCH
-static int bellon = 0;    /* visual bell status */
-#endif // VISUALBELL_1_PATCH
 
 #include "patch/x_include.c"
 
@@ -354,9 +320,7 @@ zoomabs(const Arg *arg)
 {
 	xunloadfonts();
 	xloadfonts(usedfont, arg->f);
-	#if FONT2_PATCH
 	xloadsparefonts();
-	#endif // FONT2_PATCH
 	cresize(0, 0);
 	redraw();
 	xhints();
@@ -376,11 +340,7 @@ zoomreset(const Arg *arg)
 int
 evcol(XEvent *e)
 {
-	#if ANYSIZE_PATCH
-	int x = e->xbutton.x - win.hborderpx;
-	#else
 	int x = e->xbutton.x - borderpx;
-	#endif // ANYSIZE_PATCH
 	LIMIT(x, 0, win.tw - 1);
 	return x / win.cw;
 }
@@ -388,11 +348,7 @@ evcol(XEvent *e)
 int
 evrow(XEvent *e)
 {
-	#if ANYSIZE_PATCH
-	int y = e->xbutton.y - win.vborderpx;
-	#else
 	int y = e->xbutton.y - borderpx;
-	#endif // ANYSIZE_PATCH
 	LIMIT(y, 0, win.th - 1);
 	return y / win.ch;
 }
@@ -416,7 +372,6 @@ mouseaction(XEvent *e, uint release)
 	/* ignore Button<N>mask for Button<N> - it's set on release */
 	uint state = e->xbutton.state & ~buttonmask(e->xbutton.button);
 
-	#if SCROLLBACK_MOUSE_ALTSCREEN_PATCH
 	if (tisaltscr())
 		for (ms = maltshortcuts; ms < maltshortcuts + LEN(maltshortcuts); ms++) {
 			if (ms->release == release &&
@@ -428,7 +383,6 @@ mouseaction(XEvent *e, uint release)
 			}
 		}
 	else
-	#endif // SCROLLBACK_MOUSE_ALTSCREEN_PATCH
 	for (ms = mshortcuts; ms < mshortcuts + LEN(mshortcuts); ms++) {
 		if (ms->release == release &&
 				ms->button == e->xbutton.button &&
@@ -740,9 +694,7 @@ setsel(char *str, Time t)
 	if (XGetSelectionOwner(xw.dpy, XA_PRIMARY) != xw.win)
 		selclear();
 
-	#if CLIPBOARD_PATCH
 	clipcopy(NULL);
-	#endif // CLIPBOARD_PATCH
 }
 
 void
@@ -763,23 +715,13 @@ brelease(XEvent *e)
 		return;
 	if (e->xbutton.button == Button1)
 		mousesel(e, 1);
-	#if RIGHTCLICKTOPLUMB_PATCH
 	else if (e->xbutton.button == Button3)
 		plumb(xsel.primary);
-	#endif // RIGHTCLICKTOPLUMB_PATCH
 }
 
 void
 bmotion(XEvent *e)
 {
-	#if HIDECURSOR_PATCH
-	if (!xw.pointerisvisible) {
-		XDefineCursor(xw.dpy, xw.win, xw.vpointer);
-		xw.pointerisvisible = 1;
-		if (!IS_SET(MODE_MOUSEMANY))
-			xsetpointermotion(0);
-	}
-	#endif // HIDECURSOR_PATCH
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
@@ -804,10 +746,6 @@ cresize(int width, int height)
 	col = MAX(1, col);
 	row = MAX(1, row);
 
-	#if ANYSIZE_PATCH
-	win.hborderpx = (win.w - col * win.cw) / 2;
-	win.vborderpx = (win.h - row * win.ch) / 2;
-	#endif // ANYSIZE_PATCH
 
 	tresize(col, row);
 	xresize(col, row);
@@ -822,11 +760,7 @@ xresize(int col, int row)
 
 	XFreePixmap(xw.dpy, xw.buf);
 	xw.buf = XCreatePixmap(xw.dpy, xw.win, win.w, win.h,
-			#if ALPHA_PATCH
 			xw.depth
-			#else
-			DefaultDepth(xw.dpy, xw.scr)
-			#endif // ALPHA_PATCH
 	);
 	XftDrawChange(xw.draw, xw.buf);
 	xclear(0, 0, win.w, win.h);
@@ -887,14 +821,12 @@ xloadcols(void)
 			else
 				die("could not allocate color %d\n", i);
 		}
-	#if ALPHA_PATCH
 	/* set alpha value of bg color */
 	if (opt_alpha)
 		alpha = strtof(opt_alpha, NULL);
 	dc.col[defaultbg].color.alpha = (unsigned short)(0xffff * alpha);
 	dc.col[defaultbg].pixel &= 0x00FFFFFF;
 	dc.col[defaultbg].pixel |= (unsigned char)(0xff * alpha) << 24;
-	#endif // ALPHA_PATCH
 	loaded = 1;
 }
 
@@ -921,30 +853,16 @@ xsetcolorname(int x, const char *name)
 void
 xclear(int x1, int y1, int x2, int y2)
 {
-	#if INVERT_PATCH
-	Color c;
-	c = dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg];
-	if (invertcolors) {
-		c = invertedcolor(&c);
-	}
-	XftDrawRect(xw.draw, &c, x1, y1, x2-x1, y2-y1);
-	#else
 	XftDrawRect(xw.draw,
 			&dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg],
 			x1, y1, x2-x1, y2-y1);
-	#endif // INVERT_PATCH
 }
 
 void
 xhints(void)
 {
-	#if XRESOURCES_PATCH
 	XClassHint class = {opt_name ? opt_name : "st",
 	                    opt_class ? opt_class : "St"};
-	#else
-	XClassHint class = {opt_name ? opt_name : termname,
-	                    opt_class ? opt_class : termname};
-	#endif // XRESOURCES_PATCH
 	XWMHints wm = {.flags = InputHint, .input = 1};
 	XSizeHints *sizeh;
 
@@ -953,13 +871,8 @@ xhints(void)
 	sizeh->flags = PSize | PResizeInc | PBaseSize | PMinSize;
 	sizeh->height = win.h;
 	sizeh->width = win.w;
-	#if ANYSIZE_PATCH
-	sizeh->height_inc = 1;
-	sizeh->width_inc = 1;
-	#else
 	sizeh->height_inc = win.ch;
 	sizeh->width_inc = win.cw;
-	#endif // ANYSIZE_PATCH
 	sizeh->base_height = 2 * borderpx;
 	sizeh->base_width = 2 * borderpx;
 	sizeh->min_height = win.ch + 2 * borderpx;
@@ -1174,31 +1087,19 @@ xloadfonts(char *fontstr, double fontsize)
 	/* Setting character width and height. */
 	win.cw = ceilf(dc.font.width * cwscale);
 	win.ch = ceilf(dc.font.height * chscale);
-	#if VERTCENTER_PATCH
-	win.cyo = ceilf(dc.font.height * (chscale - 1) / 2);
-	#endif // VERTCENTER_PATCH
 
-	#if RELATIVEBORDER_PATCH
-	borderpx = (int) ceilf(((float)borderperc / 100) * win.cw);
-	#endif // RELATIVEBORDER_PATCH
 	FcPatternDel(pattern, FC_SLANT);
-	#if !DISABLE_ITALIC_FONTS_PATCH
 	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ITALIC);
-	#endif // DISABLE_ITALIC_FONTS_PATCH
 	if (xloadfont(&dc.ifont, pattern))
 		die("can't open font %s\n", fontstr);
 
 	FcPatternDel(pattern, FC_WEIGHT);
-	#if !DISABLE_BOLD_FONTS_PATCH
 	FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
-	#endif // DISABLE_BOLD_FONTS_PATCH
 	if (xloadfont(&dc.ibfont, pattern))
 		die("can't open font %s\n", fontstr);
 
 	FcPatternDel(pattern, FC_SLANT);
-	#if !DISABLE_ROMAN_FONTS_PATCH
 	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ROMAN);
-	#endif // DISABLE_ROMAN_FONTS_PATCH
 	if (xloadfont(&dc.bfont, pattern))
 		die("can't open font %s\n", fontstr);
 
@@ -1231,24 +1132,17 @@ void
 xinit(int cols, int rows)
 {
 	XGCValues gcvalues;
-	#if HIDECURSOR_PATCH
-	Pixmap blankpm;
-	#else
 	Cursor cursor;
-	#endif // HIDECURSOR_PATCH
 	Window parent;
 	pid_t thispid = getpid();
 	XColor xmousefg, xmousebg;
-	#if ALPHA_PATCH
 	XWindowAttributes attr;
 	XVisualInfo vis;
-	#endif // ALPHA_PATCH
 
 	if (!(xw.dpy = XOpenDisplay(NULL)))
 		die("can't open display\n");
 	xw.scr = XDefaultScreen(xw.dpy);
 
-	#if ALPHA_PATCH
 	if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0)))) {
 		parent = XRootWindow(xw.dpy, xw.scr);
 		xw.depth = 32;
@@ -1259,9 +1153,6 @@ xinit(int cols, int rows)
 
 	XMatchVisualInfo(xw.dpy, xw.scr, xw.depth, TrueColor, &vis);
 	xw.vis = vis.visual;
-	#else
-	xw.vis = XDefaultVisual(xw.dpy, xw.scr);
-	#endif // ALPHA_PATCH
 
 	/* font */
 	if (!FcInit())
@@ -1270,27 +1161,16 @@ xinit(int cols, int rows)
 	usedfont = (opt_font == NULL)? font : opt_font;
 	xloadfonts(usedfont, 0);
 
-	#if FONT2_PATCH
 	/* spare fonts */
 	xloadsparefonts();
-	#endif // FONT2_PATCH
 
 	/* colors */
-	#if ALPHA_PATCH
 	xw.cmap = XCreateColormap(xw.dpy, parent, xw.vis, None);
-	#else
-	xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
-	#endif // ALPHA_PATCH
 	xloadcols();
 
 	/* adjust fixed window geometry */
-	#if ANYSIZE_PATCH
-	win.w = 2 * win.hborderpx + cols * win.cw;
-	win.h = 2 * win.vborderpx + rows * win.ch;
-	#else
 	win.w = 2 * borderpx + cols * win.cw;
 	win.h = 2 * borderpx + rows * win.ch;
-	#endif // ANYSIZE_PATCH
 	if (xw.gm & XNegative)
 		xw.l += DisplayWidth(xw.dpy, xw.scr) - win.w - 2;
 	if (xw.gm & YNegative)
@@ -1303,37 +1183,19 @@ xinit(int cols, int rows)
 	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
 		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
 		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask
-		#if ST_EMBEDDER_PATCH
-		| SubstructureNotifyMask | SubstructureRedirectMask
-		#endif // ST_EMBEDDER_PATCH
 		;
 	xw.attrs.colormap = xw.cmap;
 
-	#if !ALPHA_PATCH
-	if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
-		parent = XRootWindow(xw.dpy, xw.scr);
-	#endif // ALPHA_PATCH
 	xw.win = XCreateWindow(xw.dpy, parent, xw.l, xw.t,
-			#if ALPHA_PATCH
 			win.w, win.h, 0, xw.depth, InputOutput,
-			#else
-			win.w, win.h, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
-			#endif // ALPHA_PATCH
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
 
 	memset(&gcvalues, 0, sizeof(gcvalues));
 	gcvalues.graphics_exposures = False;
 
-	#if ALPHA_PATCH
 	xw.buf = XCreatePixmap(xw.dpy, xw.win, win.w, win.h, xw.depth);
 	dc.gc = XCreateGC(xw.dpy, xw.buf, GCGraphicsExposures, &gcvalues);
-	#else
-	dc.gc = XCreateGC(xw.dpy, parent, GCGraphicsExposures,
-			&gcvalues);
-	xw.buf = XCreatePixmap(xw.dpy, xw.win, win.w, win.h,
-			DefaultDepth(xw.dpy, xw.scr));
-	#endif // ALPHA_PATCH
 	XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
 	XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, win.w, win.h);
 
@@ -1350,23 +1212,9 @@ xinit(int cols, int rows)
 	}
 
 	/* white cursor, black outline */
-	#if HIDECURSOR_PATCH
-	xw.pointerisvisible = 1;
-	#if THEMED_CURSOR_PATCH
-	xw.vpointer = XcursorLibraryLoadCursor(xw.dpy, mouseshape);
-	#else
-	xw.vpointer = XCreateFontCursor(xw.dpy, mouseshape);
-	#endif // THEMED_CURSOR_PATCH
-	XDefineCursor(xw.dpy, xw.win, xw.vpointer);
-	#elif THEMED_CURSOR_PATCH
-	cursor = XcursorLibraryLoadCursor(xw.dpy, mouseshape);
-	XDefineCursor(xw.dpy, xw.win, cursor);
-	#else
 	cursor = XCreateFontCursor(xw.dpy, mouseshape);
 	XDefineCursor(xw.dpy, xw.win, cursor);
-	#endif // HIDECURSOR_PATCH
 
-	#if !THEMED_CURSOR_PATCH
 	if (XParseColor(xw.dpy, xw.cmap, colorname[mousefg], &xmousefg) == 0) {
 		xmousefg.red   = 0xffff;
 		xmousefg.green = 0xffff;
@@ -1378,18 +1226,8 @@ xinit(int cols, int rows)
 		xmousebg.green = 0x0000;
 		xmousebg.blue  = 0x0000;
 	}
-	#endif // THEMED_CURSOR_PATCH
 
-	#if HIDECURSOR_PATCH
-	#if !THEMED_CURSOR_PATCH
-	XRecolorCursor(xw.dpy, xw.vpointer, &xmousefg, &xmousebg);
-	#endif // THEMED_CURSOR_PATCH
-	blankpm = XCreateBitmapFromData(xw.dpy, xw.win, &(char){0}, 1, 1);
-	xw.bpointer = XCreatePixmapCursor(xw.dpy, blankpm, blankpm,
-					  &xmousefg, &xmousebg, 0, 0);
-	#elif !THEMED_CURSOR_PATCH
 	XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
-	#endif // HIDECURSOR_PATCH
 
 	xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
 	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
@@ -1414,19 +1252,12 @@ xinit(int cols, int rows)
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
 
-	#if BOXDRAW_PATCH
-	boxdraw_xinit(xw.dpy, xw.cmap, xw.draw, xw.vis);
-	#endif // BOXDRAW_PATCH
 }
 
 int
 xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x, int y)
 {
-	#if ANYSIZE_PATCH
-	float winx = win.hborderpx + x * win.cw, winy = win.vborderpx + y * win.ch, xp, yp;
-	#else
 	float winx = borderpx + x * win.cw, winy = borderpx + y * win.ch, xp, yp;
-	#endif // ANYSIZE_PATCH
 	ushort mode, prevmode = USHRT_MAX;
 	Font *font = &dc.font;
 	int frcflags = FRC_NORMAL;
@@ -1439,11 +1270,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 	FcCharSet *fccharset;
 	int i, f, numspecs = 0;
 
-	#if VERTCENTER_PATCH
-	for (i = 0, xp = winx, yp = winy + font->ascent + win.cyo; i < len; ++i)
-	#else
 	for (i = 0, xp = winx, yp = winy + font->ascent; i < len; ++i)
-	#endif // VERTCENTER_PATCH
 	{
 		/* Fetch rune and mode for current glyph. */
 		rune = glyphs[i].u;
@@ -1469,25 +1296,11 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 				font = &dc.bfont;
 				frcflags = FRC_BOLD;
 			}
-			#if VERTCENTER_PATCH
-			yp = winy + font->ascent + win.cyo;
-			#else
 			yp = winy + font->ascent;
-			#endif // VERTCENTER_PATCH
 		}
 
-		#if BOXDRAW_PATCH
-		if (mode & ATTR_BOXDRAW) {
-			/* minor shoehorning: boxdraw uses only this ushort */
-			glyphidx = boxdrawindex(&glyphs[i]);
-		} else {
-			/* Lookup character index with default font. */
-			glyphidx = XftCharIndex(xw.dpy, font->match, rune);
-		}
-		#else
 		/* Lookup character index with default font. */
 		glyphidx = XftCharIndex(xw.dpy, font->match, rune);
-		#endif // BOXDRAW_PATCH
 		if (glyphidx) {
 			specs[numspecs].font = font->match;
 			specs[numspecs].glyph = glyphidx;
@@ -1578,11 +1391,7 @@ void
 xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, int y)
 {
 	int charlen = len * ((base.mode & ATTR_WIDE) ? 2 : 1);
-	#if ANYSIZE_PATCH
-	int winx = win.hborderpx + x * win.cw, winy = win.vborderpx + y * win.ch;
-	#else
 	int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch;
-	#endif // ANYSIZE_PATCH
 	int width = charlen * win.cw;
 	Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
 	XRenderColor colfg, colbg;
@@ -1619,11 +1428,9 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		bg = &dc.col[base.bg];
 	}
 
-	#if !BOLD_IS_NOT_BRIGHT_PATCH
 	/* Change basic system colors [0-7] to bright system colors [8-15] */
 	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
 		fg = &dc.col[base.fg + 8];
-	#endif // BOLD_IS_NOT_BRIGHT_PATCH
 
 	if (IS_SET(MODE_REVERSE)) {
 		if (fg == &dc.col[defaultfg]) {
@@ -1661,20 +1468,9 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	}
 
 	if (base.mode & ATTR_REVERSE) {
-		#if SPOILER_PATCH
-		if (bg == fg) {
-			bg = &dc.col[defaultfg];
-			fg = &dc.col[defaultbg];
-		} else {
-			temp = fg;
-			fg = bg;
-			bg = temp;
-		}
-		#else
 		temp = fg;
 		fg = bg;
 		bg = temp;
-		#endif // SPOILER_PATCH
 	}
 
 	if (base.mode & ATTR_BLINK && win.mode & MODE_BLINK)
@@ -1683,31 +1479,8 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	if (base.mode & ATTR_INVISIBLE)
 		fg = bg;
 
-	#if INVERT_PATCH
-	if (invertcolors) {
-		revfg = invertedcolor(fg);
-		revbg = invertedcolor(bg);
-		fg = &revfg;
-		bg = &revbg;
-	}
-	#endif // INVERT_PATCH
 
 	/* Intelligent cleaning up of the borders. */
-	#if ANYSIZE_PATCH
-	if (x == 0) {
-		xclear(0, (y == 0)? 0 : winy, win.vborderpx,
-			winy + win.ch +
-			((winy + win.ch >= win.vborderpx + win.th)? win.h : 0));
-	}
-	if (winx + width >= win.hborderpx + win.tw) {
-		xclear(winx + width, (y == 0)? 0 : winy, win.w,
-			((winy + win.ch >= win.vborderpx + win.th)? win.h : (winy + win.ch)));
-	}
-	if (y == 0)
-		xclear(winx, 0, winx + width, win.hborderpx);
-	if (winy + win.ch >= win.vborderpx + win.th)
-		xclear(winx, winy + win.ch, winx + width, win.h);
-	#else
 	if (x == 0) {
 		xclear(0, (y == 0)? 0 : winy, borderpx,
 			winy + win.ch +
@@ -1721,7 +1494,6 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		xclear(winx, 0, winx + width, borderpx);
 	if (winy + win.ch >= borderpx + win.th)
 		xclear(winx, winy + win.ch, winx + width, win.h);
-	#endif // ANYSIZE_PATCH
 
 	/* Clean up the region we want to draw to. */
 	XftDrawRect(xw.draw, bg, winx, winy, width, win.ch);
@@ -1733,37 +1505,18 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	r.width = width;
 	XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
 
-	#if BOXDRAW_PATCH
-	if (base.mode & ATTR_BOXDRAW) {
-		drawboxes(winx, winy, width / len, win.ch, fg, bg, specs, len);
-	} else {
-		/* Render the glyphs. */
-		XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
-	}
-	#else
 	/* Render the glyphs. */
 	XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
-	#endif // BOXDRAW_PATCH
 
 	/* Render underline and strikethrough. */
 	if (base.mode & ATTR_UNDERLINE) {
-		#if VERTCENTER_PATCH
-		XftDrawRect(xw.draw, fg, winx, winy + win.cyo + dc.font.ascent + 1,
-				width, 1);
-		#else
 		XftDrawRect(xw.draw, fg, winx, winy + dc.font.ascent + 1,
 				width, 1);
-		#endif
 	}
 
 	if (base.mode & ATTR_STRUCK) {
-		#if VERTCENTER_PATCH
-		XftDrawRect(xw.draw, fg, winx, winy + win.cyo + 2 * dc.font.ascent / 3,
-				width, 1);
-		#else
 		XftDrawRect(xw.draw, fg, winx, winy + 2 * dc.font.ascent / 3,
 				width, 1);
-		#endif // VERTCENTER_PATCH
 	}
 
 	/* Reset clip to none. */
@@ -1796,11 +1549,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 	/*
 	 * Select the right color for the right mode.
 	 */
-	#if BOXDRAW_PATCH
-	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE|ATTR_BOXDRAW;
-	#else
 	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
-	#endif // BOXDRAW_PATCH
 
 	if (IS_SET(MODE_REVERSE)) {
 		g.mode |= ATTR_REVERSE;
@@ -1835,69 +1584,36 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 			break;
 		case 3: /* Blinking Underline */
 		case 4: /* Steady Underline */
-			#if ANYSIZE_PATCH
-			XftDrawRect(xw.draw, &drawcol,
-					win.hborderpx + cx * win.cw,
-					win.vborderpx + (cy + 1) * win.ch - \
-						cursorthickness,
-					win.cw, cursorthickness);
-			#else
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * win.cw,
 					borderpx + (cy + 1) * win.ch - \
 						cursorthickness,
 					win.cw, cursorthickness);
-			#endif // ANYSIZE_PATCH
 			break;
 		case 5: /* Blinking bar */
 		case 6: /* Steady bar */
 			XftDrawRect(xw.draw, &drawcol,
-					#if ANYSIZE_PATCH
-					win.hborderpx + cx * win.cw,
-					win.vborderpx + cy * win.ch,
-					#else
 					borderpx + cx * win.cw,
 					borderpx + cy * win.ch,
-					#endif // ANYSIZE_PATCH
 					cursorthickness, win.ch);
 			break;
 		}
 	} else {
 		XftDrawRect(xw.draw, &drawcol,
-				#if ANYSIZE_PATCH
-				win.hborderpx + cx * win.cw,
-				win.vborderpx + cy * win.ch,
-				#else
 				borderpx + cx * win.cw,
 				borderpx + cy * win.ch,
-				#endif // ANYSIZE_PATCH
 				win.cw - 1, 1);
 		XftDrawRect(xw.draw, &drawcol,
-				#if ANYSIZE_PATCH
-				win.hborderpx + cx * win.cw,
-				win.vborderpx + cy * win.ch,
-				#else
 				borderpx + cx * win.cw,
 				borderpx + cy * win.ch,
-				#endif // ANYSIZE_PATCH
 				1, win.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
-				#if ANYSIZE_PATCH
-				win.hborderpx + (cx + 1) * win.cw - 1,
-				win.vborderpx + cy * win.ch,
-				#else
 				borderpx + (cx + 1) * win.cw - 1,
 				borderpx + cy * win.ch,
-				#endif // ANYSIZE_PATCH
 				1, win.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
-				#if ANYSIZE_PATCH
-				win.hborderpx + cx * win.cw,
-				win.vborderpx + (cy + 1) * win.ch - 1,
-				#else
 				borderpx + cx * win.cw,
 				borderpx + (cy + 1) * win.ch - 1,
-				#endif // ANYSIZE_PATCH
 				win.cw, 1);
 	}
 }
@@ -1945,10 +1661,6 @@ xdrawline(Line line, int x1, int y1, int x2)
 			continue;
 		if (selected(x, y1))
 			new.mode ^= ATTR_REVERSE;
-		#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-		if (win.vbellset && isvbellcell(x, y1))
-			new.mode ^= ATTR_REVERSE;
-		#endif // VISUALBELL_2_PATCH
 		if (i > 0 && ATTRCMP(base, new)) {
 			xdrawglyphfontspecs(specs, base, i, ox, y1);
 			specs += i;
@@ -1968,10 +1680,6 @@ xdrawline(Line line, int x1, int y1, int x2)
 void
 xfinishdraw(void)
 {
-	#if VISUALBELL_3_PATCH
-	if (vbellmode == 3 && win.vbellset)
-		xdrawvbell();
-	#endif // VISUALBELL_3_PATCH
 	XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
 			win.h, 0, 0);
 	XSetForeground(xw.dpy, dc.gc,
@@ -2008,23 +1716,12 @@ visibility(XEvent *ev)
 void
 unmap(XEvent *ev)
 {
-	#if ST_EMBEDDER_PATCH
-	if (embed == ev->xunmap.window) {
-		embed = 0;
-		XRaiseWindow(xw.dpy, xw.win);
-		XSetInputFocus(xw.dpy, xw.win, RevertToParent, CurrentTime);
-	}
-	#endif // ST_EMBEDDER_PATCH
 	win.mode &= ~MODE_VISIBLE;
 }
 
 void
 xsetpointermotion(int set)
 {
-	#if HIDECURSOR_PATCH
-	if (!set && !xw.pointerisvisible)
-		return;
-	#endif // HIDECURSOR_PATCH
 	MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
 	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 }
@@ -2066,19 +1763,6 @@ xbell(void)
 	if (bellvolume)
 		XkbBell(xw.dpy, xw.win, bellvolume, (Atom)NULL);
 
-	#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-	if (vbelltimeout)
-		vbellbegin();
-	#elif VISUALBELL_1_PATCH
-	/* visual bell*/
-	if (!bellon) {
-		bellon = 1;
-		MODBIT(win.mode, !IS_SET(MODE_REVERSE), MODE_REVERSE);
-		redraw();
-		XFlush(xw.dpy);
-		MODBIT(win.mode, !IS_SET(MODE_REVERSE), MODE_REVERSE);
-	}
-	#endif // VISUALBELL_1_PATCH / VISUALBELL_2_PATCH
 }
 
 void
@@ -2086,14 +1770,6 @@ focus(XEvent *ev)
 {
 	XFocusChangeEvent *e = &ev->xfocus;
 
-	#if ST_EMBEDDER_PATCH
-	if (embed && ev->type == FocusIn) {
-		XRaiseWindow(xw.dpy, embed);
-		XSetInputFocus(xw.dpy, embed, RevertToParent, CurrentTime);
-		sendxembed(XEMBED_FOCUS_IN, XEMBED_FOCUS_CURRENT, 0, 0);
-		sendxembed(XEMBED_WINDOW_ACTIVATE, 0, 0, 0);
-	}
-	#endif // ST_EMBEDDER_PATCH
 
 	if (e->mode == NotifyGrab)
 		return;
@@ -2168,13 +1844,6 @@ kpress(XEvent *ev)
 	Status status;
 	Shortcut *bp;
 
-	#if HIDECURSOR_PATCH
-	if (xw.pointerisvisible) {
-		XDefineCursor(xw.dpy, xw.win, xw.bpointer);
-		xsetpointermotion(1);
-		xw.pointerisvisible = 0;
-	}
-	#endif // HIDECURSOR_PATCH
 
 	if (IS_SET(MODE_KBDLOCK))
 		return;
@@ -2183,14 +1852,6 @@ kpress(XEvent *ev)
 		len = XmbLookupString(xw.ime.xic, e, buf, sizeof buf, &ksym, &status);
 	else
 		len = XLookupString(e, buf, sizeof buf, &ksym, NULL);
-	#if KEYBOARDSELECT_PATCH
-	if ( IS_SET(MODE_KBDSELECT) ) {
-		if ( match(XK_NO_MOD, e->state) ||
-			(XK_Shift_L | XK_Shift_R) & e->state )
-			win.mode ^= trt_kbdselect(ksym, buf, len);
-		return;
-	}
-	#endif // KEYBOARDSELECT_PATCH
 
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
@@ -2248,20 +1909,10 @@ cmessage(XEvent *e)
 void
 resize(XEvent *e)
 {
-	#if ST_EMBEDDER_PATCH
-	XWindowChanges wc;
-	#endif // ST_EMBEDDER_PATCH
 
 	if (e->xconfigure.width == win.w && e->xconfigure.height == win.h)
 		return;
 
-	#if ST_EMBEDDER_PATCH
-	if (embed) {
-		wc.width = e->xconfigure.width;
-		wc.height = e->xconfigure.height;
-		XConfigureWindow(xw.dpy, embed, CWWidth | CWHeight, &wc);
-	}
-	#endif // ST_EMBEDDER_PATCH
 
 	cresize(e->xconfigure.width, e->xconfigure.height);
 }
@@ -2276,9 +1927,6 @@ run(void)
 	int ttyfd;
 	struct timespec drawtimeout, *tv = NULL, now, last, lastblink;
 	long deltatime;
-	#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-	long to_ms, remain;
-	#endif // VISUALBELL_2_PATCH
 
 	/* Waiting for window mapping */
 	do {
@@ -2330,39 +1978,12 @@ run(void)
 		tv = &drawtimeout;
 
 		dodraw = 0;
-		#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-		to_ms = -1; /* timeout in ms, indefinite if negative */
-		if (blinkset) {
-			remain = blinktimeout - TIMEDIFF(now, lastblink);
-			if (remain <= 0) {
-				dodraw = 1;
-				remain = 1; /* draw, wait 1ms, and re-calc */
-				tsetdirtattr(ATTR_BLINK);
-				win.mode ^= MODE_BLINK;
-				lastblink = now;
-			}
-			to_ms = remain;
-		}
-		if (win.vbellset) {
-			remain = vbelltimeout - TIMEDIFF(now, win.lastvbell);
-			if (remain <= 0) {
-				dodraw = 1;
-				remain = -1; /* draw (clear), and that's it */
-				tfulldirt();
-				win.vbellset = 0;
-			}
-			if (remain >= 0 && (to_ms < 0 || remain < to_ms))
-				to_ms = remain;
-		}
-
-		#else
 		if (blinktimeout && TIMEDIFF(now, lastblink) > blinktimeout) {
 			tsetdirtattr(ATTR_BLINK);
 			win.mode ^= MODE_BLINK;
 			lastblink = now;
 			dodraw = 1;
 		}
-		#endif // VISUALBELL_2_PATCH
 		deltatime = TIMEDIFF(now, last);
 		if (deltatime > 1000 / (xev ? xfps : actionfps)) {
 			dodraw = 1;
@@ -2378,30 +1999,12 @@ run(void)
 					(handler[ev.type])(&ev);
 			}
 
-			#if VISUALBELL_1_PATCH && !VISUALBELL_2_PATCH && !VISUALBELL_3_PATCH
-			if (bellon) {
-				bellon = 0;
-				redraw();
-			}
-			else draw();
- 			XFlush(xw.dpy);
-			#else
 			draw();
-			#endif // VISUALBELL_1_PATCH
 			XFlush(xw.dpy);
 
 			if (xev && !FD_ISSET(xfd, &rfd))
 				xev--;
 			if (!FD_ISSET(ttyfd, &rfd) && !FD_ISSET(xfd, &rfd)) {
-				#if VISUALBELL_2_PATCH || VISUALBELL_3_PATCH
-				if (to_ms >= 0) {
-					static const long k = 1E3, m = 1E6;
-					drawtimeout.tv_sec = to_ms / k;
-					drawtimeout.tv_nsec = (to_ms % k) * m;
-				} else {
-					tv = NULL;
-				}
-				#else
 				if (blinkset) {
 					if (TIMEDIFF(now, lastblink) \
 							> blinktimeout) {
@@ -2418,7 +2021,6 @@ run(void)
 				} else {
 					tv = NULL;
 				}
-				#endif // VISUALBELL_2_PATCH
 			}
 		}
 	}
@@ -2428,17 +2030,11 @@ void
 usage(void)
 {
 	die("usage: %s [-aiv] [-c class]"
-		#if WORKINGDIR_PATCH
-		" [-d path]"
-		#endif // WORKINGDIR_PATCH
 		" [-f font] [-g geometry]"
 	    " [-n name] [-o file]\n"
 	    "          [-T title] [-t title] [-w windowid]"
 	    " [[-e] command [args ...]]\n"
 	    "       %s [-aiv] [-c class]"
-		#if WORKINGDIR_PATCH
-		" [-d path]"
-		#endif // WORKINGDIR_PATCH
 		" [-f font] [-g geometry]"
 	    " [-n name] [-o file]\n"
 	    "          [-T title] [-t title] [-w windowid] -l line"
@@ -2456,19 +2052,12 @@ main(int argc, char *argv[])
 	case 'a':
 		allowaltscreen = 0;
 		break;
-	#if ALPHA_PATCH
 	case 'A':
 		opt_alpha = EARGF(usage());
 		break;
-	#endif // ALPHA_PATCH
 	case 'c':
 		opt_class = EARGF(usage());
 		break;
-	#if WORKINGDIR_PATCH
-	case 'd':
-		opt_dir = EARGF(usage());
-		break;
-	#endif // WORKINGDIR_PATCH
 	case 'e':
 		if (argc > 0)
 			--argc, ++argv;
@@ -2515,22 +2104,16 @@ run:
 
 	setlocale(LC_CTYPE, "");
 	XSetLocaleModifiers("");
-	#if XRESOURCES_PATCH
 	if (!(xw.dpy = XOpenDisplay(NULL)))
 		die("Can't open display\n");
 
 	config_init();
-	#endif // XRESOURCES_PATCH
 	cols = MAX(cols, 1);
 	rows = MAX(rows, 1);
 	tnew(cols, rows);
 	xinit(cols, rows);
 	xsetenv();
 	selinit();
-	#if WORKINGDIR_PATCH
-	if (opt_dir && chdir(opt_dir))
-		die("Can't change to working directory %s\n", opt_dir);
-	#endif // WORKINGDIR_PATCH
 	run();
 
 	return 0;
